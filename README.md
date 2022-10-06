@@ -4,13 +4,13 @@ Python library for postcard scanner
 
 Install from github with
 ```
-pip install git+https://github.com/nzottmann/postcardscanner.git
+pip install git+https://github.com/nzottmann/postcardscanner-python.git
 ```
 
 or install a specific version with
 ```
-pip install git+https://github.com/nzottmann/postcardscanner.git@1.0.0
+pip install git+https://github.com/nzottmann/postcardscanner-python.git@1.0.0
 ```
 
 # Usage
-See https://github.com/nzottmann/postcardscanner
+See main repository for examples: https://github.com/nzottmann/postcardscanner
