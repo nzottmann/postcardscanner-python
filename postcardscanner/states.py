@@ -1,3 +1,6 @@
+# Copyright 2022 Nils Zottmann
+# Licensed under the EUPL-1.2-or-later
+
 class PostcardScannerState(object):
     """
     This class simply defines constants used to represent the states of the

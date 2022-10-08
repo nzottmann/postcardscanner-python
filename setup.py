@@ -1,3 +1,6 @@
+# Copyright 2022 Nils Zottmann
+# Licensed under the EUPL-1.2-or-later
+
 import setuptools
 
 with open("README.md", "r", encoding="utf-8") as fh:

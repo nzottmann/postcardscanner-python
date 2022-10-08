@@ -1,5 +1,7 @@
 Python library for postcard scanner
 
+Licensed under the [EUPL-1.2-or-later](https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12)
+
 # Installation
 
 Install from github with
