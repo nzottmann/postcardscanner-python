@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="postcardscanner-nzottmann",
-    version="1.1.0",
+    version="1.2.0",
     author="Nils Zottmann",
     author_email="mail@nils-zottmann.de",
     description="Library for postcard scanner",
