@@ -7,7 +7,10 @@ import time
 from io import BytesIO
 import subprocess
 import RPi.GPIO as GPIO
+from picamera2 import Picamera2, Preview
 from RpiMotorLib import RpiMotorLib
+from PIL import Image, ImageEnhance
+from pyzbar.pyzbar import decode, ZBarSymbol
 from .scanner import Scanner
 from postcardscanner.states import PostcardScannerState
 
@@ -40,6 +43,9 @@ class ScannerV3(Scanner):
 
         self.motor = RpiMotorLib.A4988Nema(pins['dir'], pins['step'], pins['mode'], "DRV8825")
         
+        Picamera2.set_logging(Picamera2.WARNING)
+        self.picam2 = Picamera2()
+        
         self._init_state()
         
     def _sensor_occupied(self, sensor):
@@ -70,14 +76,6 @@ class ScannerV3(Scanner):
         else:
             self.pos = 2
         
-    def capture(self):
-        process = subprocess.Popen(
-            ['libcamera-still', '-n', '-t', '1', '-o', '-'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL
-        )        
-        return BytesIO(process.stdout.read())
-    
 
     # Idle waiting for postcard
     def state_0(self):
@@ -92,7 +90,7 @@ class ScannerV3(Scanner):
         self._reset_timeout()
         self._mot_sleep(1)
         while True:
-            self.motor.motor_go(self.clockwise, "1/16", 100, self.stepdelay, False, 0)
+            self.motor.motor_go(self.clockwise, self.steptype_1, 100, self.stepdelay, False, 0)
 
             if self._is_timeout_elapsed(5):
                 return 99
@@ -130,7 +128,7 @@ class ScannerV3(Scanner):
         self.motor.motor_go(self.clockwise, self.steptype_1, 10, self.stepdelay, False, 0) # A bit more
         
         while True: # Slowly back to 1 to have an exact position
-            self.motor.motor_go(not self.clockwise, "1/16", 10, self.stepdelay, False, 0)
+            self.motor.motor_go(not self.clockwise, self.steptype_1, 1, self.stepdelay, False, self.stepdelay)
 
             if self._is_timeout_elapsed(10):
                 return 99
@@ -138,15 +136,59 @@ class ScannerV3(Scanner):
                 break
         
         # Move to capture position
-        self.motor.motor_go(not self.clockwise, "1/16", 20*8, self.stepdelay, False, 0)
+        self.motor.motor_go(not self.clockwise, self.steptype_1, 20, self.stepdelay, False, 0)
 
         # Capture
         self._mot_sleep(0)
         self._led(1)
         try:
-            self.callback(self.capture())
+            self.picam2.start_preview(Preview.NULL) # Preview.DRM to see a preview
+            still_config = self.picam2.create_still_configuration(display='main', main={"size": (4608, 2592)})
+            self.picam2.configure(still_config)
+            self.picam2.start()
+
+            self.picam2.autofocus_cycle()
+            img = self.picam2.capture_image("main")
+
+            self.picam2.stop()
+            self.picam2.stop_preview()
         except Exception as e:
             logger.error(f'Capture callback raised exception: {e}')
+            return 5
+        finally:
+            self._led(0)
+
+        try:
+            position = (860, 300)
+            dimensions = (2940, 2000)
+            img = img.crop((position[0], position[1], position[0] + dimensions[0], position[1] + dimensions[1]))
+            
+            # Crop possible qr locations
+            img_bottomleft = img.crop((0, img.height*0.7, img.width*0.2, img.height))
+            img_topright = img.crop((img.width*0.8, 0, img.width, img.height*0.3))
+
+            # Enhance contrast
+            img_bottomleft = ImageEnhance.Contrast(img_bottomleft).enhance(3.0)
+            img_topright = ImageEnhance.Contrast(img_topright).enhance(3.0)
+
+            # Detect
+            code_list_bottomleft = decode(img_bottomleft, symbols=[ZBarSymbol.QRCODE])
+            code_list_topright = decode(img_topright, symbols=[ZBarSymbol.QRCODE])
+
+            if code_list_bottomleft:
+                img = img.transpose(Image.ROTATE_180)
+                logger.info('Rotating image')
+                qr = code_list_bottomleft[0]
+            elif code_list_topright:
+                qr = code_list_topright[0]
+            else:
+                logger.info('No qr found')
+                return 5
+
+            img.save('img.jpg', quality=95)
+        except Exception as e:
+            logger.error(f'Error exracting qr code: {e}')
+            return 5
         
         return 4
     
@@ -167,7 +209,33 @@ class ScannerV3(Scanner):
 
         return 0
     
-    # Error state
+    # Eject
+    def state_5(self):
+        self._reset_timeout()
+        self._mot_sleep(1)
+        self.motor.motor_go(not self.clockwise, self.steptype_2, 900, self.stepdelay, False, 0)
+        while True: # Eject until 2 not occupied anymore
+            self.motor.motor_go(not self.clockwise, self.steptype_2, 10, self.stepdelay, False, 0)
+
+            if self._is_timeout_elapsed(5):
+                return 99
+            if not self._sensor_occupied(2):
+                break
+        self.motor.motor_go(not self.clockwise, self.steptype_2, 100, self.stepdelay, False, 0) # Eject a little bit more, postcard just stuck
+        self._mot_sleep(0)
+
+        self._reset_timeout()
+        while True: # Wait until postcard is removed
+            if self._is_timeout_elapsed(10): # User did not remove postcard -> pull inside without scanning
+                return 4
+            if self._all_sensors_occupied((0, 1, 2)): # User pushed postcard back inside -> scan again
+                return 2
+            if self._no_sensor_occupied((0, 1, 2, 3)): # User removed postcard
+                break
+
+        return 0
+    
+    # Error state, wait until stuck postcard is removed manually
     def state_99(self):
         self._mot_sleep(0)
         while not self._no_sensor_occupied((0, 1, 2, 3)):
@@ -182,6 +250,7 @@ class ScannerV3(Scanner):
             2: self.state_2,
             3: self.state_3,
             4: self.state_4,
+            5: self.state_5,
             99: self.state_99
         }
 
