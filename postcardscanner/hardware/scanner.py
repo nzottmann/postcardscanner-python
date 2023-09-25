@@ -9,6 +9,12 @@ class Scanner():
     
     def simulate_scan(self, image=None):
         pass
+
+    def accept_postcard(self):
+        pass
+
+    def reject_postcard(self):
+        pass
     
     def loop(self) -> PostcardScannerState:
         return PostcardScannerState.enabled

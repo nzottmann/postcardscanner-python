@@ -4,8 +4,7 @@
 import logging
 logger = logging.getLogger('scanner_v3')
 import time
-from io import BytesIO
-import subprocess
+import threading
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2, Preview
 from RpiMotorLib import RpiMotorLib
@@ -21,6 +20,8 @@ class ScannerV3(Scanner):
     stepdelay = .0003
     counter = 0
     last_timeout_reset = time.monotonic()
+    postcard_accepted = False
+    user_feedback_event = threading.Event()
     def __init__(self, callback, pins={
         'dir': 4,
         'step': 17,
@@ -75,7 +76,15 @@ class ScannerV3(Scanner):
             self.pos = 0
         else:
             self.pos = 2
-        
+
+    
+    def accept_postcard(self):
+        self.postcard_accepted = True
+        self.user_feedback_event.set()
+
+    def reject_postcard(self):
+        self.postcard_accepted = False
+        self.user_feedback_event.set()
 
     # Idle waiting for postcard
     def state_0(self):
@@ -154,7 +163,7 @@ class ScannerV3(Scanner):
             self.picam2.stop_preview()
         except Exception as e:
             logger.error(f'Capture callback raised exception: {e}')
-            return 5
+            return 6
         finally:
             self._led(0)
 
@@ -183,17 +192,34 @@ class ScannerV3(Scanner):
                 qr = code_list_topright[0]
             else:
                 logger.info('No qr found')
-                return 5
+                return 6
 
             img.save('img.jpg', quality=95)
         except Exception as e:
             logger.error(f'Error exracting qr code: {e}')
-            return 5
+            return 6
         
         return 4
-    
-    # Throw out
+
+    # Wait for user feedback
     def state_4(self):
+        logger.info('waiting for user feedback')
+        if self.user_feedback_event.wait(timeout=120.0):
+            self.user_feedback_event.clear()
+            if self.postcard_accepted:
+                logger.info('user accepted postcard')
+                return 5
+        else: # Timeout
+            logger.info('timeout waiting for user feedback: collect postcard')
+            return 5
+        
+        # User did not accept postcard -> return
+        logger.info('user rejected postcard')
+        return 6
+    
+    # Collect postcard
+    def state_5(self):
+        logger.info('5')
         self._reset_timeout()
         self._mot_sleep(1)
         while True: # Proceed until 2 not occupied anymore
@@ -210,7 +236,7 @@ class ScannerV3(Scanner):
         return 0
     
     # Eject
-    def state_5(self):
+    def state_6(self):
         self._reset_timeout()
         self._mot_sleep(1)
         self.motor.motor_go(not self.clockwise, self.steptype_2, 900, self.stepdelay, False, 0)
@@ -226,11 +252,14 @@ class ScannerV3(Scanner):
 
         self._reset_timeout()
         while True: # Wait until postcard is removed
-            if self._is_timeout_elapsed(10): # User did not remove postcard -> pull inside without scanning
-                return 4
+            if self._is_timeout_elapsed(60): # User did not remove postcard -> pull inside without scanning
+                logger.info('timeout waiting for user to remove postcard')
+                return 5
             if self._all_sensors_occupied((0, 1, 2)): # User pushed postcard back inside -> scan again
+                logger.info('user pushed postcard inside instead of removing: scan again')
                 return 2
             if self._no_sensor_occupied((0, 1, 2, 3)): # User removed postcard
+                logger.info('user removed postcard')
                 break
 
         return 0
@@ -251,6 +280,7 @@ class ScannerV3(Scanner):
             3: self.state_3,
             4: self.state_4,
             5: self.state_5,
+            6: self.state_6,
             99: self.state_99
         }
 

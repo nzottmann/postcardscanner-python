@@ -17,6 +17,12 @@ class PostcardScanner(threading.Thread):
         
     def simulate_scan(self, image=None):
         self.scanner.simulate_scan(image)
+
+    def accept_postcard(self):
+        self.scanner.accept_postcard()
+
+    def reject_postcard(self):
+        self.scanner.reject_postcard()
         
     def run(self):
         self.state = PostcardScannerState.enabled
