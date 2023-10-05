@@ -292,4 +292,9 @@ class ScannerV3(Scanner):
         # Disable motor after each step
         self._mot_sleep(0)
         
-        return PostcardScannerState.enabled
+        if self.pos in [1, 2, 3]:
+            return PostcardScannerState.scanning
+        elif self.pos == 99:
+            return PostcardScannerState.error
+        else:
+            return PostcardScannerState.enabled
