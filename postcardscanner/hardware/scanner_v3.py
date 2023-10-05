@@ -195,6 +195,7 @@ class ScannerV3(Scanner):
                 self.callback(img, success=False)
                 return 6
 
+            self.user_feedback_event.clear() # Clear old events just before saving a new image
             self.callback(img, success=True)
         except Exception as e:
             logger.error(f'Error exracting qr code: {e}')
