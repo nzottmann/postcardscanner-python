@@ -192,9 +192,10 @@ class ScannerV3(Scanner):
                 qr = code_list_topright[0]
             else:
                 logger.info('No qr found')
+                self.callback(img, success=False)
                 return 6
 
-            img.save('img.jpg', quality=95)
+            self.callback(img, success=True)
         except Exception as e:
             logger.error(f'Error exracting qr code: {e}')
             return 6
